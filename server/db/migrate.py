@@ -89,19 +89,21 @@ def insert_sample_data(cur):
             VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE + INTERVAL '7 days')
         """, (emp_id, title, desc, status, priority, assigned_by))
 
-def check_connection():
+def check_connection(silent=False):
     """Test database connection"""
     try:
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute("SELECT version()")
         version = cur.fetchone()[0]
-        logger.info(f"Database connected: {version}")
+        if not silent:
+            logger.info(f"Database connected: {version}")
         cur.close()
         conn.close()
         return True
     except Exception as e:
-        logger.error(f"Database connection failed: {e}")
+        if not silent:
+            logger.error(f"Database connection failed: {e}")
         return False
 
 if __name__ == "__main__":

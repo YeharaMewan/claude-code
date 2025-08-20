@@ -282,20 +282,31 @@ def initialize_app():
         logger.error("OPENAI_API_KEY is not set properly")
         sys.exit(1)
     
-    # Wait for database to be ready
+    # Wait for database to be ready with better logging
+    logger.info("Waiting for database to be ready...")
     max_retries = 30
+    retry_count = 0
+    
     for i in range(max_retries):
         try:
-            if check_connection():
+            # Use silent check to avoid spam logs
+            if check_connection(silent=True):
                 logger.info("Database connection successful")
                 break
         except Exception as e:
-            logger.info(f"Waiting for database... attempt {i+1}/{max_retries}")
-            if i == max_retries - 1:
-                logger.error(f"Database connection failed after {max_retries} attempts: {e}")
-                sys.exit(1)
-            import time
-            time.sleep(2)
+            pass  # Ignore errors during retries
+        
+        retry_count += 1
+        # Only log every 5th attempt to reduce spam
+        if retry_count % 5 == 0:
+            logger.info(f"Still waiting for database... attempt {retry_count}/{max_retries}")
+        
+        if i == max_retries - 1:
+            logger.error(f"Database connection failed after {max_retries} attempts")
+            sys.exit(1)
+        
+        import time
+        time.sleep(2)
     
     # Run database migrations
     try:
