@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import asyncio
+import sys
 from datetime import datetime
 from typing import Dict, Any, List, AsyncGenerator
 import uuid
@@ -13,12 +14,24 @@ import uuid
 from flask import Flask, request, Response, jsonify
 from flask_cors import CORS
 
-# Import our components
-from agents.planner import plan_and_execute_query, PlannerResult
-from db.migrate import run_migrations, check_connection
-
-logging.basicConfig(level=logging.INFO)
+# Configure logging first
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Import our components with error handling
+try:
+    from agents.planner import plan_and_execute_query, PlannerResult
+    from db.migrate import run_migrations, check_connection
+    logger.info("Successfully imported components")
+except ImportError as e:
+    logger.error(f"Failed to import components: {e}")
+    sys.exit(1)
 
 app = Flask(__name__)
 CORS(app)
@@ -53,7 +66,7 @@ class ChatSession:
             for msg in self.messages
         ]
 
-# In-memory session storage (in production, use Redis or database)
+# In-memory session storage
 sessions: Dict[str, ChatSession] = {}
 
 async def stream_chat_response(
@@ -67,7 +80,7 @@ async def stream_chat_response(
         session.add_message('user', user_message)
         
         # Get conversation history
-        conversation_history = session.get_conversation_history()[:-1]  # Exclude current message
+        conversation_history = session.get_conversation_history()[:-1]
         
         # Start planning
         yield f"data: {json.dumps({'type': 'status', 'content': 'Processing your request...'})}\n\n"
@@ -87,8 +100,6 @@ async def stream_chat_response(
                     'is_final': step.is_final
                 }
                 yield f"data: {json.dumps(step_data)}\n\n"
-                
-                # Small delay for better UX
                 await asyncio.sleep(0.1)
             
             # Stream tool calls if any
@@ -143,7 +154,7 @@ async def stream_chat_response(
 def health_check():
     """Health check endpoint"""
     try:
-        # Check database connection
+        # Check database connection with timeout
         db_healthy = check_connection()
         
         health_status = {
@@ -157,6 +168,7 @@ def health_check():
         return jsonify(health_status), status_code
         
     except Exception as e:
+        logger.error(f"Health check error: {e}")
         return jsonify({
             'status': 'unhealthy',
             'error': str(e),
@@ -257,11 +269,33 @@ def not_found(error):
 
 @app.errorhandler(500)
 def internal_error(error):
+    logger.error(f"Internal server error: {error}")
     return jsonify({'error': 'Internal server error'}), 500
 
 def initialize_app():
     """Initialize the application"""
     logger.info("Initializing HR Agent API server...")
+    
+    # Check required environment variables
+    openai_key = os.getenv('OPENAI_API_KEY')
+    if not openai_key or openai_key == 'your_openai_api_key_here':
+        logger.error("OPENAI_API_KEY is not set properly")
+        sys.exit(1)
+    
+    # Wait for database to be ready
+    max_retries = 30
+    for i in range(max_retries):
+        try:
+            if check_connection():
+                logger.info("Database connection successful")
+                break
+        except Exception as e:
+            logger.info(f"Waiting for database... attempt {i+1}/{max_retries}")
+            if i == max_retries - 1:
+                logger.error(f"Database connection failed after {max_retries} attempts: {e}")
+                sys.exit(1)
+            import time
+            time.sleep(2)
     
     # Run database migrations
     try:
@@ -270,15 +304,17 @@ def initialize_app():
         logger.info("Database migrations completed")
     except Exception as e:
         logger.error(f"Database migration failed: {e}")
-        # Don't fail startup, but log the error
+        sys.exit(1)
     
-    logger.info("HR Agent API server initialized")
+    logger.info("HR Agent API server initialized successfully")
 
 if __name__ == '__main__':
     # Initialize before running
     initialize_app()
     
     logger.info(f"Starting HR Agent API server on port {PORT}")
+    
+    # Use development server
     app.run(
         host='0.0.0.0',
         port=PORT,

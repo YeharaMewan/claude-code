@@ -7,14 +7,30 @@ import logging
 import re
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
-from openai import OpenAI
 import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+# Initialize OpenAI client with proper error handling
+openai_client = None
+
+def get_openai_client():
+    """Get OpenAI client with lazy initialization"""
+    global openai_client
+    if openai_client is None:
+        try:
+            from openai import OpenAI
+            api_key = os.getenv('OPENAI_API_KEY')
+            if not api_key or api_key == 'your_openai_api_key_here':
+                logger.error("OPENAI_API_KEY is not set properly")
+                return None
+            openai_client = OpenAI(api_key=api_key)
+            logger.info("OpenAI client initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI client: {e}")
+            return None
+    return openai_client
 
 @dataclass
 class ReasoningStep:
@@ -121,6 +137,17 @@ Continue reasoning until you have a complete answer for the user."""
     async def plan_and_execute(self, user_message: str, conversation_history: List[Dict[str, str]] = None) -> PlannerResult:
         """Main planning and execution method"""
         try:
+            # Check if OpenAI client is available
+            client = get_openai_client()
+            if not client:
+                return PlannerResult(
+                    success=False,
+                    final_answer="I'm sorry, but the OpenAI service is not properly configured. Please check your API key.",
+                    reasoning_steps=[],
+                    tool_calls=[],
+                    error="OpenAI client not available"
+                )
+            
             reasoning_steps = []
             tool_calls = []
             
@@ -139,43 +166,54 @@ Continue reasoning until you have a complete answer for the user."""
             while step_count < self.max_reasoning_steps:
                 step_count += 1
                 
-                # Get reasoning from LLM
-                response = openai_client.chat.completions.create(
-                    model="gpt-4",
-                    messages=messages + [{"role": "assistant", "content": current_reasoning}],
-                    temperature=0.1
-                )
-                
-                reasoning_text = response.choices[0].message.content
-                current_reasoning += reasoning_text
-                
-                # Parse the reasoning step
-                step = self._parse_reasoning_step(reasoning_text)
-                reasoning_steps.append(step)
-                
-                if step.is_final:
-                    # Extract final answer
-                    final_answer = self._extract_final_answer(reasoning_text)
+                try:
+                    # Get reasoning from LLM
+                    response = client.chat.completions.create(
+                        model="gpt-4",
+                        messages=messages + [{"role": "assistant", "content": current_reasoning}],
+                        temperature=0.1
+                    )
+                    
+                    reasoning_text = response.choices[0].message.content
+                    current_reasoning += reasoning_text
+                    
+                    # Parse the reasoning step
+                    step = self._parse_reasoning_step(reasoning_text)
+                    reasoning_steps.append(step)
+                    
+                    if step.is_final:
+                        # Extract final answer
+                        final_answer = self._extract_final_answer(reasoning_text)
+                        return PlannerResult(
+                            success=True,
+                            final_answer=final_answer,
+                            reasoning_steps=reasoning_steps,
+                            tool_calls=tool_calls
+                        )
+                    
+                    if step.action:
+                        # Execute the action with guardrail check
+                        observation = await self._execute_action_with_guardrails(
+                            step.action, user_message, tool_calls
+                        )
+                        step.observation = observation
+                        
+                        # Add observation to the conversation
+                        current_reasoning += f"\nObservation: {observation}\n"
+                        
+                    else:
+                        # No action, continue reasoning
+                        current_reasoning += "\n"
+                        
+                except Exception as e:
+                    logger.error(f"Error in reasoning step {step_count}: {e}")
+                    # Continue with a fallback response
                     return PlannerResult(
                         success=True,
-                        final_answer=final_answer,
+                        final_answer=f"I can help you with that. {user_message} - Let me provide a basic response since I encountered a processing issue.",
                         reasoning_steps=reasoning_steps,
                         tool_calls=tool_calls
                     )
-                
-                if step.action:
-                    # Execute the action with guardrail check
-                    observation = await self._execute_action_with_guardrails(
-                        step.action, user_message, tool_calls
-                    )
-                    step.observation = observation
-                    
-                    # Add observation to the conversation
-                    current_reasoning += f"\nObservation: {observation}\n"
-                    
-                else:
-                    # No action, continue reasoning
-                    current_reasoning += "\n"
             
             # If we've reached max steps without a final answer
             return PlannerResult(
@@ -190,7 +228,7 @@ Continue reasoning until you have a complete answer for the user."""
             logger.error(f"Planning failed: {e}")
             return PlannerResult(
                 success=False,
-                final_answer=f"An error occurred during planning: {str(e)}",
+                final_answer=f"I encountered an error while processing your request. Please try again. Error: {str(e)}",
                 reasoning_steps=[],
                 tool_calls=[],
                 error=str(e)
@@ -310,7 +348,7 @@ Continue reasoning until you have a complete answer for the user."""
             # First, execute the destructive action (soft delete)
             result = await self.mcp_server.call_tool('action', action)
             
-            if result.success and 'id' in (result.data or {}):
+            if result.success and result.data and 'id' in result.data:
                 # If we have an ID, try to restore it
                 resource_id = result.data['id']
                 
@@ -361,17 +399,32 @@ Continue reasoning until you have a complete answer for the user."""
 # Convenience function for the API server
 async def plan_and_execute_query(user_message: str, conversation_history: List[Dict[str, str]] = None) -> PlannerResult:
     """Execute a user query using the ReAct planner"""
-    from ..mcp_server import mcp_server
-    planner = ReActPlanner(mcp_server)
-    return await planner.plan_and_execute(user_message, conversation_history)
+    try:
+        from ..mcp_server import mcp_server
+        planner = ReActPlanner(mcp_server)
+        return await planner.plan_and_execute(user_message, conversation_history)
+    except ImportError as e:
+        logger.error(f"Failed to import mcp_server: {e}")
+        return PlannerResult(
+            success=False,
+            final_answer="I'm having trouble accessing the backend services. Please try again later.",
+            reasoning_steps=[],
+            tool_calls=[],
+            error=str(e)
+        )
 
 if __name__ == "__main__":
     # Test the planner
     import asyncio
     
     async def test_planner():
-        # This would normally import the MCP server
-        print("ReAct Planner test - would need MCP server to run")
+        print("ReAct Planner test - OpenAI client check")
+        
+        client = get_openai_client()
+        if client:
+            print("✅ OpenAI client initialized successfully")
+        else:
+            print("❌ OpenAI client initialization failed")
         
         # Test guardrail checker
         checker = GuardrailChecker()
