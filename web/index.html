@@ -5,7 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ChatGPT</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/lib/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js" id="marked-primary"></script>
+    <script>
+        // Fallback loader for marked.js
+        window.addEventListener('load', function() {
+            if (typeof marked === 'undefined') {
+                console.warn('[CDN Fallback] Primary marked.js CDN failed, trying fallback...');
+                const fallbackScript = document.createElement('script');
+                fallbackScript.src = 'https://unpkg.com/marked/lib/marked.umd.js';
+                fallbackScript.id = 'marked-fallback';
+                fallbackScript.onload = function() {
+                    console.log('[CDN Fallback] Marked.js loaded from unpkg.com');
+                };
+                fallbackScript.onerror = function() {
+                    console.error('[CDN Fallback] All CDN sources failed for marked.js');
+                };
+                document.head.appendChild(fallbackScript);
+            } else {
+                console.log('[CDN] Marked.js loaded successfully from primary CDN');
+            }
+        });
+    </script>
     <style>
         :root {
             --bg-primary: #0f0f23;
@@ -38,6 +58,32 @@
             line-height: 1.6;
         }
 
+        /* Global scrollbar styles - force visibility everywhere */
+        * {
+            scrollbar-width: auto !important;
+            scrollbar-color: #4a5568 #2a2b32 !important;
+        }
+
+        *::-webkit-scrollbar {
+            width: 16px !important;
+            height: 16px !important;
+        }
+
+        *::-webkit-scrollbar-track {
+            background: #2a2b32 !important;
+            border-radius: 8px;
+        }
+
+        *::-webkit-scrollbar-thumb {
+            background: #4a5568 !important;
+            border-radius: 8px;
+            border: 2px solid #2a2b32;
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+            background: #718096 !important;
+        }
+
         .app-container {
             display: flex;
             height: 100vh;
@@ -56,6 +102,30 @@
         .sidebar-header {
             padding: 20px;
             border-bottom: 1px solid var(--border-color);
+        }
+
+        .clear-all-btn {
+            width: 100%;
+            padding: 10px 16px;
+            background-color: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .clear-all-btn:hover {
+            background-color: rgba(239, 68, 68, 0.1);
+            border-color: #ef4444;
+            color: #ef4444;
         }
 
         .new-chat-btn {
@@ -82,21 +152,40 @@
 
         .sidebar-content {
             flex: 1;
-            overflow-y: auto;
+            overflow-y: scroll !important; /* Force scrollbar always visible */
+            overflow-x: hidden;
             padding: 8px;
+            height: 0; /* Allows flex child to shrink */
+            min-height: 0; /* Allows flex child to shrink */
         }
 
+        /* Sidebar scrollbar - WebKit browsers */
         .sidebar-content::-webkit-scrollbar {
-            width: 6px;
+            width: 12px !important;
+            background: var(--bg-secondary);
         }
 
         .sidebar-content::-webkit-scrollbar-track {
-            background: transparent;
+            background: var(--bg-secondary) !important;
+            border-radius: 6px;
+            margin: 2px;
         }
 
         .sidebar-content::-webkit-scrollbar-thumb {
-            background: var(--border-color);
-            border-radius: 3px;
+            background: #4a5568 !important; /* More visible color */
+            border-radius: 6px;
+            border: 1px solid var(--bg-secondary);
+            min-height: 30px;
+        }
+
+        .sidebar-content::-webkit-scrollbar-thumb:hover {
+            background: #718096 !important;
+        }
+
+        /* Firefox scrollbar for sidebar */
+        .sidebar-content {
+            scrollbar-width: auto !important;
+            scrollbar-color: #4a5568 var(--bg-secondary) !important;
         }
 
         .chat-item {
@@ -110,6 +199,10 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .chat-item:hover {
@@ -119,6 +212,45 @@
         .chat-item.active {
             background-color: var(--bg-tertiary);
             color: var(--text-primary);
+        }
+
+        .chat-item-content {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .chat-item-delete {
+            opacity: 0;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+
+        .chat-item:hover .chat-item-delete {
+            opacity: 1;
+        }
+
+        .chat-item-delete:hover {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+
+        .chat-item-delete svg {
+            width: 14px;
+            height: 14px;
         }
 
         /* Main Content */
@@ -141,21 +273,53 @@
         /* Messages */
         .messages-container {
             flex: 1;
-            overflow-y: auto;
+            overflow-y: scroll !important; /* Force scrollbar to always show */
+            overflow-x: hidden;
             padding: 0;
+            height: 0; /* Allows flex child to shrink */
+            min-height: 0; /* Allows flex child to shrink */
         }
 
+        /* Force scrollbar visibility - WebKit browsers (Chrome, Safari, Edge) */
         .messages-container::-webkit-scrollbar {
-            width: 6px;
+            width: 16px !important;
+            background: var(--bg-primary);
         }
 
         .messages-container::-webkit-scrollbar-track {
-            background: transparent;
+            background: var(--bg-secondary) !important;
+            border-radius: 8px;
+            margin: 4px;
         }
 
         .messages-container::-webkit-scrollbar-thumb {
-            background: var(--border-color);
-            border-radius: 3px;
+            background: #4a5568 !important; /* More visible color */
+            border-radius: 8px;
+            border: 2px solid var(--bg-secondary);
+            min-height: 50px; /* Minimum thumb size */
+        }
+
+        .messages-container::-webkit-scrollbar-thumb:hover {
+            background: #718096 !important; /* Even more visible on hover */
+        }
+
+        .messages-container::-webkit-scrollbar-thumb:active {
+            background: #2d3748 !important;
+        }
+
+        /* Firefox scrollbar - always visible */
+        .messages-container {
+            scrollbar-width: auto !important; /* Use auto instead of thin for better visibility */
+            scrollbar-color: #4a5568 var(--bg-secondary) !important;
+        }
+
+        /* Fallback for browsers that don't support custom scrollbars */
+        @supports not (scrollbar-width: auto) {
+            .messages-container {
+                overflow-y: scroll !important;
+                padding-right: 17px; /* Compensate for scrollbar width */
+                margin-right: -17px;
+            }
         }
 
         .message {
@@ -517,6 +681,12 @@
                     </svg>
                     New chat
                 </button>
+                <button class="clear-all-btn" onclick="clearAllChats()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 6H5H21M8 6V4C8 3.44772 8.44772 3 9 3H15C15.5523 3 16 3.44772 16 4V6M19 6V20C19 20.5523 18.4477 21 18 21H6C5.44772 21 5 20.5523 5 20V6H19Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    Clear all chats
+                </button>
             </div>
             <div class="sidebar-content" id="chatHistory">
                 <!-- Chat history will be populated here -->
@@ -594,11 +764,153 @@
         let chatSessions = JSON.parse(localStorage.getItem('chatSessions')) || {};
         let isStreaming = false;
         let messageHistory = [];
+        let markdownParser = null;
+
+        // Markdown parsing utility with fallbacks
+        function initializeMarkdownParser() {
+            // Check if marked is available
+            if (typeof marked !== 'undefined') {
+                console.log('[MarkdownParser] Using marked.js library');
+                markdownParser = {
+                    parse: (text) => marked.parse(text),
+                    available: true,
+                    library: 'marked'
+                };
+                return true;
+            }
+            
+            // Fallback: Simple markdown-like parsing
+            console.warn('[MarkdownParser] marked.js not available, using fallback parser');
+            markdownParser = {
+                parse: (text) => {
+                    if (!text) return '';
+                    
+                    // Simple markdown parsing fallback
+                    return text
+                        // Headers
+                        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+                        .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+                        .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+                        
+                        // Bold
+                        .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+                        .replace(/__(.*?)__/gim, '<strong>$1</strong>')
+                        
+                        // Italic
+                        .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+                        .replace(/_(.*?)_/gim, '<em>$1</em>')
+                        
+                        // Code blocks
+                        .replace(/```([\s\S]*?)```/gim, '<pre><code>$1</code></pre>')
+                        .replace(/`(.*?)`/gim, '<code>$1</code>')
+                        
+                        // Line breaks
+                        .replace(/\n\n/gim, '</p><p>')
+                        .replace(/\n/gim, '<br>')
+                        
+                        // Wrap in paragraphs
+                        .replace(/^(.*)$/gim, '<p>$1</p>')
+                        
+                        // Clean up extra paragraphs
+                        .replace(/<p><\/p>/gim, '')
+                        .replace(/<p>(<h[1-6]>.*<\/h[1-6]>)<\/p>/gim, '$1')
+                        .replace(/<p>(<pre><code>[\s\S]*?<\/code><\/pre>)<\/p>/gim, '$1');
+                },
+                available: true,
+                library: 'fallback'
+            };
+            return false;
+        }
+
+        // Safe markdown parsing function
+        function parseMarkdown(content) {
+            if (!content) return '';
+            
+            try {
+                if (!markdownParser) {
+                    initializeMarkdownParser();
+                }
+                
+                const result = markdownParser.parse(content);
+                console.log('[MarkdownParser] Parsed content using:', markdownParser.library);
+                return result;
+                
+            } catch (error) {
+                console.error('[MarkdownParser] Parsing error:', error);
+                // Ultimate fallback: return content with basic HTML escaping and line breaks
+                return content
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/\n/g, '<br>');
+            }
+        }
+
+        // Check if libraries are loaded
+        function checkLibrariesLoaded() {
+            const markedAvailable = typeof marked !== 'undefined';
+            console.log('[LibraryCheck] marked.js available:', markedAvailable);
+            
+            if (!markedAvailable) {
+                console.warn('[LibraryCheck] marked.js failed to load from CDN');
+            }
+            
+            return { marked: markedAvailable };
+        }
+
+        // Force scrollbar visibility
+        function forceScrollbarVisibility() {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const sidebarContent = document.getElementById('chatHistory');
+            
+            // Force scrollbar to appear by temporarily setting overflow
+            if (messagesContainer) {
+                messagesContainer.style.overflowY = 'scroll';
+                messagesContainer.style.scrollbarWidth = 'auto';
+                console.log('[ScrollFix] Applied scrollbar styles to messages container');
+            }
+            
+            if (sidebarContent) {
+                sidebarContent.style.overflowY = 'scroll';
+                sidebarContent.style.scrollbarWidth = 'auto';
+                console.log('[ScrollFix] Applied scrollbar styles to sidebar');
+            }
+        }
 
         // Initialize app
         document.addEventListener('DOMContentLoaded', function() {
+            // Check library availability and log status
+            const libraries = checkLibrariesLoaded();
+            
+            // Initialize markdown parser
+            initializeMarkdownParser();
+            
             loadChatHistory();
             setupTextareaAutoResize();
+            
+            // Force scrollbar visibility
+            forceScrollbarVisibility();
+            
+            // Add some test content to make scrollbar appear
+            setTimeout(() => {
+                const messagesContainer = document.getElementById('messagesContainer');
+                if (messagesContainer && messagesContainer.children.length <= 2) {
+                    // Add invisible content to force scrollbar
+                    const spacer = document.createElement('div');
+                    spacer.style.height = '2000px';
+                    spacer.style.visibility = 'hidden';
+                    spacer.style.pointerEvents = 'none';
+                    spacer.id = 'scroll-spacer';
+                    messagesContainer.appendChild(spacer);
+                    console.log('[ScrollFix] Added scroll spacer to force scrollbar');
+                }
+            }, 100);
+            
+            // Log initialization status
+            console.log('[App] Initialized successfully', {
+                markdownParser: markdownParser?.library || 'none',
+                libraries: libraries
+            });
         });
 
         function setupTextareaAutoResize() {
@@ -649,10 +961,75 @@
             sessions.forEach(session => {
                 const item = document.createElement('div');
                 item.className = 'chat-item';
-                item.textContent = session.title || 'New Chat';
-                item.onclick = () => loadSession(session.id);
+                item.setAttribute('data-session-id', session.id);
+                
+                // Create content container
+                const content = document.createElement('div');
+                content.className = 'chat-item-content';
+                content.textContent = session.title || 'New Chat';
+                content.onclick = () => loadSession(session.id);
+                
+                // Create delete button
+                const deleteBtn = document.createElement('button');
+                deleteBtn.className = 'chat-item-delete';
+                deleteBtn.innerHTML = `
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                `;
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    deleteChatSession(session.id);
+                };
+                deleteBtn.title = 'Delete chat';
+                
+                item.appendChild(content);
+                item.appendChild(deleteBtn);
                 historyContainer.appendChild(item);
             });
+        }
+        
+        function deleteChatSession(sessionId) {
+            // Show confirmation dialog
+            if (confirm('Are you sure you want to delete this chat? This action cannot be undone.')) {
+                // Remove from storage
+                const sessionKey = `session_${sessionId}`;
+                delete chatSessions[sessionKey];
+                localStorage.setItem('chatSessions', JSON.stringify(chatSessions));
+                
+                // If this was the current session, start a new chat
+                if (currentSessionId === sessionId) {
+                    startNewChat();
+                }
+                
+                // Reload chat history to update the sidebar
+                loadChatHistory();
+                
+                console.log('[ChatHistory] Deleted session:', sessionId);
+            }
+        }
+
+        function clearAllChats() {
+            const chatCount = Object.keys(chatSessions).length;
+            if (chatCount === 0) {
+                alert('No chats to clear.');
+                return;
+            }
+            
+            // Show confirmation dialog
+            if (confirm(`Are you sure you want to delete all ${chatCount} chat(s)? This action cannot be undone.`)) {
+                // Clear all sessions
+                chatSessions = {};
+                localStorage.setItem('chatSessions', JSON.stringify(chatSessions));
+                
+                // Start a new chat
+                startNewChat();
+                
+                // Reload chat history to update the sidebar
+                loadChatHistory();
+                
+                console.log('[ChatHistory] Cleared all chats');
+            }
         }
 
         function loadSession(sessionId) {
@@ -713,90 +1090,168 @@
         }
 
         async function streamChatResponse(message) {
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
+            console.log('[StreamChat] Starting chat request for message:', message);
+            
+            try {
+                const requestBody = {
                     message: message,
                     session_id: currentSessionId
-                })
-            });
+                };
+                console.log('[StreamChat] Request body:', requestBody);
 
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'text/event-stream',
+                        'Cache-Control': 'no-cache'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
 
-            const sessionId = response.headers.get('X-Session-ID');
-            if (sessionId) {
-                currentSessionId = sessionId;
-            }
+                console.log('[StreamChat] Response status:', response.status);
+                console.log('[StreamChat] Response headers:', Array.from(response.headers.entries()));
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('[StreamChat] HTTP error response:', errorText);
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
 
-            let assistantMessageElement = null;
-            let finalAnswer = '';
+                if (!response.body) {
+                    throw new Error('Response body is null - streaming not supported');
+                }
 
-            try {
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
+                const sessionId = response.headers.get('X-Session-ID');
+                if (sessionId) {
+                    currentSessionId = sessionId;
+                    console.log('[StreamChat] Session ID:', sessionId);
+                }
 
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
 
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            try {
-                                const data = JSON.parse(line.slice(6));
-                                
-                                switch (data.type) {
-                                    case 'reasoning_step':
-                                        if (!assistantMessageElement) {
-                                            assistantMessageElement = addMessage('assistant', '', true);
-                                        }
-                                        addReasoningStep(assistantMessageElement, data);
-                                        break;
+                let assistantMessageElement = null;
+                let finalAnswer = '';
+                let chunkCount = 0;
+
+                try {
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) {
+                            console.log('[StreamChat] Stream completed, total chunks:', chunkCount);
+                            break;
+                        }
+
+                        chunkCount++;
+                        const chunk = decoder.decode(value, { stream: true });
+                        console.log('[StreamChat] Received chunk', chunkCount, ':', chunk);
+
+                        const lines = chunk.split('\n');
+
+                        for (const line of lines) {
+                            if (line.trim() === '') continue;
+                            
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const dataStr = line.slice(6).trim();
+                                    if (dataStr === '') continue;
                                     
-                                    case 'tool_call':
-                                        if (!assistantMessageElement) {
-                                            assistantMessageElement = addMessage('assistant', '', true);
-                                        }
-                                        addToolResult(assistantMessageElement, data);
-                                        break;
+                                    const data = JSON.parse(dataStr);
+                                    console.log('[StreamChat] Parsed SSE data:', data);
                                     
-                                    case 'final_answer':
-                                        finalAnswer = data.content;
-                                        if (!assistantMessageElement) {
-                                            assistantMessageElement = addMessage('assistant', finalAnswer);
-                                        } else {
-                                            addFinalAnswer(assistantMessageElement, finalAnswer);
-                                        }
-                                        break;
-                                    
-                                    case 'error':
-                                        addMessage('assistant', data.content);
-                                        break;
-                                    
-                                    case 'done':
-                                        saveToSession(message, finalAnswer);
-                                        break;
+                                    switch (data.type) {
+                                        case 'status':
+                                            console.log('[StreamChat] Status update:', data.content);
+                                            break;
+                                        
+                                        case 'reasoning_step':
+                                            if (!assistantMessageElement) {
+                                                assistantMessageElement = addMessage('assistant', '', true);
+                                            }
+                                            addReasoningStep(assistantMessageElement, data);
+                                            break;
+                                        
+                                        case 'tool_call':
+                                            if (!assistantMessageElement) {
+                                                assistantMessageElement = addMessage('assistant', '', true);
+                                            }
+                                            addToolResult(assistantMessageElement, data);
+                                            break;
+                                        
+                                        case 'final_answer':
+                                            finalAnswer = data.content;
+                                            if (!assistantMessageElement) {
+                                                assistantMessageElement = addMessage('assistant', finalAnswer);
+                                            } else {
+                                                addFinalAnswer(assistantMessageElement, finalAnswer);
+                                            }
+                                            console.log('[StreamChat] Final answer received');
+                                            break;
+                                        
+                                        case 'error':
+                                            console.error('[StreamChat] Server error:', data.content);
+                                            addMessage('assistant', `Error: ${data.content}`);
+                                            break;
+                                        
+                                        case 'done':
+                                            console.log('[StreamChat] Stream marked as done');
+                                            saveToSession(message, finalAnswer);
+                                            return; // Exit the function
+                                        
+                                        default:
+                                            console.warn('[StreamChat] Unknown message type:', data.type);
+                                    }
+                                } catch (e) {
+                                    console.error('[StreamChat] Error parsing SSE data:', e, 'Raw line:', line);
+                                    // Continue processing other lines
                                 }
-                            } catch (e) {
-                                console.error('Error parsing SSE data:', e);
+                            } else if (line.trim() !== '') {
+                                console.warn('[StreamChat] Non-SSE line received:', line);
                             }
                         }
                     }
+                } finally {
+                    reader.releaseLock();
+                    console.log('[StreamChat] Reader released');
                 }
-            } finally {
-                reader.releaseLock();
+                
+                // If we get here without a 'done' message, save anyway
+                if (finalAnswer) {
+                    saveToSession(message, finalAnswer);
+                }
+                
+            } catch (error) {
+                console.error('[StreamChat] Streaming error:', error);
+                
+                // Try to show a user-friendly error message
+                let errorMessage = 'Sorry, I encountered an error. ';
+                
+                if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                    errorMessage += 'Network connection failed. Please check your connection and try again.';
+                } else if (error.message.includes('HTTP error')) {
+                    errorMessage += `Server error: ${error.message}`;
+                } else if (error.message.includes('JSON')) {
+                    errorMessage += 'Received malformed data from server.';
+                } else {
+                    errorMessage += 'Please try again.';
+                }
+                
+                addMessage('assistant', errorMessage);
+                throw error; // Re-throw so the caller can handle it
             }
         }
 
         function addMessage(role, content, isStreaming = false) {
             const messagesContainer = document.getElementById('messagesContainer');
+            
+            // Remove scroll spacer if it exists (we now have real content)
+            const spacer = document.getElementById('scroll-spacer');
+            if (spacer) {
+                spacer.remove();
+                console.log('[ScrollFix] Removed scroll spacer - real content added');
+            }
+            
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${role} fade-in`;
             
@@ -822,7 +1277,7 @@
             messageText.className = 'message-text';
             
             if (content) {
-                messageText.innerHTML = marked.parse(content);
+                messageText.innerHTML = parseMarkdown(content);
                 addCopyButtons(messageText);
             }
             
@@ -880,7 +1335,7 @@
             const messageText = messageElement.querySelector('.message-text');
             
             const answerDiv = document.createElement('div');
-            answerDiv.innerHTML = marked.parse(content);
+            answerDiv.innerHTML = parseMarkdown(content);
             addCopyButtons(answerDiv);
             
             messageText.appendChild(answerDiv);

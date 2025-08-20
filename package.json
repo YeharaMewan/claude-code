@@ -1,0 +1,33 @@
+{
+  "name": "claude-code",
+  "version": "1.0.0",
+  "description": "A modernized HR Agent application built with the Model Context Protocol (MCP), featuring a ReAct reasoning loop, PostgreSQL with pgvector for document storage, and comprehensive safety guardrails.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YeharaMewan/claude-code.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/YeharaMewan/claude-code/issues"
+  },
+  "homepage": "https://github.com/YeharaMewan/claude-code#readme",
+  "dependencies": {
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "next": "^15.5.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "typescript": "^5.9.2"
+  }
+}

@@ -4,7 +4,20 @@
       "Bash(mkdir:*)",
       "Bash(chmod:*)",
       "WebFetch(domain:chat.openai.com)",
-      "WebFetch(domain:chatgpt.com)"
+      "WebFetch(domain:chatgpt.com)",
+      "Bash(curl:*)",
+      "Bash(docker-compose:*)",
+      "Bash(docker logs:*)",
+      "WebFetch(domain:cdn.jsdelivr.net)",
+      "WebSearch",
+      "Bash(docker cp:*)",
+      "Bash(timeout:*)",
+      "Bash(npm init:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(docker compose build:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker exec:*)"
     ],
     "deny": [],
     "ask": []

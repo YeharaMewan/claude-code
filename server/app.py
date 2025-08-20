@@ -69,86 +69,99 @@ class ChatSession:
 # In-memory session storage
 sessions: Dict[str, ChatSession] = {}
 
-async def stream_chat_response(
-    user_message: str, 
-    session: ChatSession
-) -> AsyncGenerator[str, None]:
+def stream_chat_response(user_message: str, session: ChatSession):
     """Stream chat response using Server-Sent Events"""
     
-    try:
-        # Add user message to session
-        session.add_message('user', user_message)
-        
-        # Get conversation history
-        conversation_history = session.get_conversation_history()[:-1]
-        
-        # Start planning
-        yield f"data: {json.dumps({'type': 'status', 'content': 'Processing your request...'})}\n\n"
-        
-        # Execute ReAct planning
-        result: PlannerResult = await plan_and_execute_query(user_message, conversation_history)
-        
-        if result.success:
-            # Stream reasoning steps
-            for i, step in enumerate(result.reasoning_steps):
-                step_data = {
-                    'type': 'reasoning_step',
-                    'step_number': i + 1,
-                    'thought': step.thought,
-                    'action': step.action,
-                    'observation': step.observation,
-                    'is_final': step.is_final
-                }
-                yield f"data: {json.dumps(step_data)}\n\n"
-                await asyncio.sleep(0.1)
+    def generate():
+        try:
+            # Add user message to session
+            session.add_message('user', user_message)
             
-            # Stream tool calls if any
-            if result.tool_calls:
-                for tool_call in result.tool_calls:
-                    tool_data = {
-                        'type': 'tool_call',
-                        'action': tool_call['action'],
-                        'result': tool_call['result'],
-                        'success': tool_call['success']
-                    }
-                    yield f"data: {json.dumps(tool_data)}\n\n"
-                    await asyncio.sleep(0.1)
+            # Get conversation history
+            conversation_history = session.get_conversation_history()[:-1]
             
-            # Stream final answer
-            yield f"data: {json.dumps({'type': 'final_answer', 'content': result.final_answer})}\n\n"
+            # Start planning
+            yield f"data: {json.dumps({'type': 'status', 'content': 'Processing your request...'})}\n\n"
             
-            # Add assistant response to session
-            session.add_message('assistant', result.final_answer, {
-                'reasoning_steps': len(result.reasoning_steps),
-                'tool_calls': len(result.tool_calls),
-                'success': True
-            })
+            # Execute ReAct planning synchronously
+            import asyncio
+            try:
+                # Get or create event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                result: PlannerResult = loop.run_until_complete(
+                    plan_and_execute_query(user_message, conversation_history)
+                )
+                
+                if result.success:
+                    # Stream reasoning steps
+                    for i, step in enumerate(result.reasoning_steps):
+                        step_data = {
+                            'type': 'reasoning_step',
+                            'step_number': i + 1,
+                            'thought': step.thought,
+                            'action': step.action,
+                            'observation': step.observation,
+                            'is_final': step.is_final
+                        }
+                        yield f"data: {json.dumps(step_data)}\n\n"
+                    
+                    # Stream tool calls if any
+                    if result.tool_calls:
+                        for tool_call in result.tool_calls:
+                            tool_data = {
+                                'type': 'tool_call',
+                                'action': tool_call['action'],
+                                'result': tool_call['result'],
+                                'success': tool_call['success']
+                            }
+                            yield f"data: {json.dumps(tool_data)}\n\n"
+                    
+                    # Stream final answer
+                    yield f"data: {json.dumps({'type': 'final_answer', 'content': result.final_answer})}\n\n"
+                    
+                    # Add assistant response to session
+                    session.add_message('assistant', result.final_answer, {
+                        'reasoning_steps': len(result.reasoning_steps),
+                        'tool_calls': len(result.tool_calls),
+                        'success': True
+                    })
+                    
+                else:
+                    # Stream error
+                    error_response = f"I apologize, but I encountered an error: {result.error or 'Unknown error'}"
+                    yield f"data: {json.dumps({'type': 'error', 'content': error_response})}\n\n"
+                    
+                    # Add error to session
+                    session.add_message('assistant', error_response, {
+                        'success': False,
+                        'error': result.error
+                    })
+                
+            except Exception as e:
+                logger.error(f"Event loop error: {e}")
+                raise
             
-        else:
-            # Stream error
-            error_response = f"I apologize, but I encountered an error: {result.error or 'Unknown error'}"
-            yield f"data: {json.dumps({'type': 'error', 'content': error_response})}\n\n"
+            # End stream
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            
+        except Exception as e:
+            logger.error(f"Streaming error: {e}")
+            error_msg = f"An unexpected error occurred: {str(e)}"
+            yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
             
             # Add error to session
-            session.add_message('assistant', error_response, {
+            session.add_message('assistant', error_msg, {
                 'success': False,
-                'error': result.error
+                'error': str(e)
             })
-        
-        # End stream
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        
-    except Exception as e:
-        logger.error(f"Streaming error: {e}")
-        error_msg = f"An unexpected error occurred: {str(e)}"
-        yield f"data: {json.dumps({'type': 'error', 'content': error_msg})}\n\n"
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        
-        # Add error to session
-        session.add_message('assistant', error_msg, {
-            'success': False,
-            'error': str(e)
-        })
+    
+    return generate()
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
