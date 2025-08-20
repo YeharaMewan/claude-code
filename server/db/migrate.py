@@ -31,15 +31,25 @@ def run_migrations():
         logger.info("Database migrations completed successfully")
         
         # Insert sample data if tables are empty
-        cur.execute("SELECT COUNT(*) FROM employees")
-        if cur.fetchone()[0] == 0:
-            logger.info("Inserting sample data...")
-            insert_sample_data(cur)
-            conn.commit()
-            logger.info("Sample data inserted")
+        try:
+            cur.execute("SELECT COUNT(*) FROM employees")
+            if cur.fetchone()[0] == 0:
+                logger.info("Inserting sample data...")
+                insert_sample_data(cur)
+                conn.commit()
+                logger.info("Sample data inserted")
+            else:
+                logger.info("Sample data already exists, skipping")
+        except Exception as sample_error:
+            logger.warning(f"Sample data insertion failed (this is OK): {sample_error}")
+            # Don't raise here - migration still successful
         
         cur.close()
         conn.close()
+        
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        raise
         
     except Exception as e:
         logger.error(f"Migration failed: {e}")
@@ -48,7 +58,7 @@ def run_migrations():
 def insert_sample_data(cur):
     """Insert sample data for development"""
     
-    # Sample employees
+    # Sample employees with ON CONFLICT handling
     employees_data = [
         ('EMP001', 'John Doe', 'john.doe@company.com', 'hr', 'Human Resources', '2022-01-15'),
         ('EMP002', 'Jane Smith', 'jane.smith@company.com', 'leader', 'Engineering', '2022-03-20'),
@@ -64,7 +74,7 @@ def insert_sample_data(cur):
             ON CONFLICT (employee_id) DO NOTHING
         """, (emp_id, name, email, role, dept, hire_date))
     
-    # Sample attendance records
+    # Sample attendance with conflict handling
     cur.execute("""
         INSERT INTO attendance (employee_id, date, check_in, check_out, status)
         VALUES 
@@ -87,25 +97,37 @@ def insert_sample_data(cur):
         cur.execute("""
             INSERT INTO tasks (employee_id, title, description, status, priority, assigned_by, due_date)
             VALUES (%s, %s, %s, %s, %s, %s, CURRENT_DATE + INTERVAL '7 days')
+            ON CONFLICT DO NOTHING
         """, (emp_id, title, desc, status, priority, assigned_by))
 
 def check_connection(silent=False):
-    """Test database connection"""
+    """Test database connection with detailed error info"""
     try:
-        conn = get_db_connection()
+        database_url = os.getenv('DATABASE_URL')
+        if not silent:
+            print(f"Trying to connect to: {database_url}")
+        
+        conn = psycopg2.connect(database_url)
         cur = conn.cursor()
         cur.execute("SELECT version()")
         version = cur.fetchone()[0]
+        
         if not silent:
-            logger.info(f"Database connected: {version}")
+            print(f"✓ Connected: {version}")
+        
         cur.close()
         conn.close()
         return True
+        
+    except psycopg2.OperationalError as e:
+        if not silent:
+            print(f"✗ Connection error: {e}")
+        return False
     except Exception as e:
         if not silent:
-            logger.error(f"Database connection failed: {e}")
+            print(f"✗ Unexpected error: {e}")
         return False
-
+    
 if __name__ == "__main__":
     if check_connection():
         run_migrations()
